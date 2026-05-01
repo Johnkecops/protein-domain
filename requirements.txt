@@ -1,0 +1,18 @@
+# Protein Domain Analysis Toolkit — Python dependencies
+# Install: pip install -r requirements.txt
+#
+# Core scientific stack
+biopython>=1.81
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# HTTP / API access
+requests>=2.31.0
+
+# Optional: fast FASTA index (used by bed_to_fasta)
+pyfaidx>=0.7.0
+
+# Web application
+streamlit>=1.32.0
