@@ -64,7 +64,8 @@ except ImportError:
     HAS_PYFAIDX = False
 
 # ── constants ───────────────────────────────────────────────────────────────
-UNIPROT_API      = "https://rest.uniprot.org/uniprotkb/search"
+UNIPROT_API       = "https://rest.uniprot.org/uniprotkb/search"
+UNIPROT_PAGE_SIZE = 500   # REST API hard cap per page (as of UniProt REST v2)
 SCEREVISIAE_TAXID = 559292
 RESULTS_DIR       = Path("results")
 
@@ -112,7 +113,7 @@ def mine_uniprot(
         "query":  query,
         "format": "tsv",
         "fields": fields,
-        "size":   min(max_results, 500),
+        "size":   min(max_results, UNIPROT_PAGE_SIZE),
     }
 
     print(f"  [UniProt] Querying organism={organism_id}, reviewed={reviewed}, "
@@ -123,8 +124,17 @@ def mine_uniprot(
     url = UNIPROT_API
 
     while url and len(rows) < max_results:
-        resp = requests.get(url, params=params, timeout=60)
-        resp.raise_for_status()
+        for attempt in range(3):
+            try:
+                resp = requests.get(url, params=params, timeout=60)
+                resp.raise_for_status()
+                break
+            except requests.RequestException as exc:
+                if attempt == 2:
+                    raise
+                wait = 2 ** attempt
+                print(f"  [UniProt] Request failed ({exc}); retrying in {wait}s …")
+                time.sleep(wait)
 
         lines = resp.text.strip().split("\n")
         if len(lines) < 2:
@@ -158,6 +168,14 @@ def mine_uniprot(
         if col not in df.columns:
             df[col] = ""
 
+    # Warn about proteins that will be silently dropped from co-occurrence
+    domain_col = next((c for c in df.columns if "domain" in c.lower()), None)
+    if domain_col:
+        n_missing = int(df[domain_col].isna().sum()) + int((df[domain_col] == "").sum())
+        if n_missing:
+            print(f"  [UniProt] WARNING: {n_missing}/{len(df)} proteins have no "
+                  f"domain annotation in '{domain_col}' — excluded from co-occurrence")
+
     out = output_dir / f"uniprot_{organism_id}.tsv"
     df.to_csv(out, sep="\t", index=False)
     print(f"  [UniProt] {len(df)} proteins saved → {out}")
@@ -183,13 +201,14 @@ def _parse_domains(raw: str) -> list[str]:
     if not raw:
         return []
 
+    # Assumes UniProt /note= values never contain literal " — true for Swiss-Prot
     notes = re.findall(r'/note="([^"]+)"', raw)
     if notes:
         return [n.strip() for n in notes if n.strip()]
 
-    # fallback — plain semicolon list
+    # fallback — plain semicolon list; drop coordinate range tokens (e.g. "1..100")
     parts = [p.strip() for p in raw.split(";")]
-    return [p for p in parts if p and not re.fullmatch(r"[\d\.\s]+", p)]
+    return [p for p in parts if p and not re.fullmatch(r"\d+\s*\.\.\s*\d+\s*", p)]
 
 
 def compute_domain_cooccurrence(df: pd.DataFrame) -> tuple[pd.DataFrame, Counter]:
@@ -205,15 +224,19 @@ def compute_domain_cooccurrence(df: pd.DataFrame) -> tuple[pd.DataFrame, Counter
     matrix      : pd.DataFrame  (domains × domains, integer counts)
     cooccurrence: Counter keyed by (domain_a, domain_b) where a ≤ b
     """
-    domain_col = next(
-        (c for c in df.columns if "domain" in c.lower()),
-        None,
-    )
-    if domain_col is None:
-        raise ValueError(
-            "No domain column found.  Expected a column whose name "
-            "contains 'domain' (e.g. 'ft_domain')."
-        )
+    if "ft_domain" in df.columns:
+        domain_col = "ft_domain"
+    else:
+        candidates = [c for c in df.columns if "domain" in c.lower()]
+        if not candidates:
+            raise ValueError(
+                "No domain column found.  Expected 'ft_domain' or a column "
+                "whose name contains 'domain'."
+            )
+        if len(candidates) > 1:
+            print(f"  [WARNING] Multiple domain columns found {candidates}; "
+                  f"using '{candidates[0]}'. Pass column name explicitly to avoid ambiguity.")
+        domain_col = candidates[0]
 
     cooccurrence: Counter = Counter()
 
@@ -234,6 +257,7 @@ def compute_domain_cooccurrence(df: pd.DataFrame) -> tuple[pd.DataFrame, Counter
 
     all_domains = sorted({d for pair in cooccurrence for d in pair})
     if not all_domains:
+        # Returns shapeless empty DataFrame; callers must guard with matrix.empty
         return pd.DataFrame(), cooccurrence
 
     matrix = pd.DataFrame(0, index=all_domains, columns=all_domains, dtype=int)
@@ -323,19 +347,30 @@ def generate_xmgrace_cooccurrence(
             (p, c) for p, c in cooccurrence.most_common(top_n)
             if p[0] == p[1]
         ]
+        print("  [XMGrace] WARNING: no co-occurring pairs found; "
+              "falling back to per-domain frequency — chart title may be misleading.")
 
     n         = len(top)
     max_count = max(c for _, c in top) if top else 10
     y_max     = max_count * 1.18
 
-    # Shortened labels for axis ticks
-    labels = []
+    # Shortened labels for axis ticks — disambiguate collisions with numeric suffix
+    raw_labels = []
     for (d1, d2), _ in top:
         if d1 == d2:
-            lbl = d1[:22]
+            raw_labels.append(d1[:22])
         else:
-            lbl = f"{d1[:14]}/{d2[:14]}"
-        labels.append(lbl)
+            raw_labels.append(f"{d1[:14]}/{d2[:14]}")
+
+    label_freq = Counter(raw_labels)
+    label_idx: dict[str, int] = {}
+    labels = []
+    for lbl in raw_labels:
+        if label_freq[lbl] > 1:
+            label_idx[lbl] = label_idx.get(lbl, 0) + 1
+            labels.append(f"{lbl[:27]}.{label_idx[lbl]}")
+        else:
+            labels.append(lbl)
 
     # ── header ──────────────────────────────────────────────────────────────
     lines = [
@@ -343,7 +378,7 @@ def generate_xmgrace_cooccurrence(
         "# Generated by Protein Domain Analysis Toolkit",
         f"# Title: {title}",
         "#",
-        "@version 50125",
+        "@version 50125",   # XMGrace 5.1.25
         "@page size 1200, 800",
         "@default linewidth 2.0",
         "@default charsize 1.200000",
@@ -745,16 +780,18 @@ def plot_cooccurrence_heatmap(
         print("  [Heatmap] Empty matrix — skipping")
         return
 
-    freq   = matrix.sum(axis=1).sort_values(ascending=False)
-    top    = freq.head(top_n).index.tolist()
-    sub    = matrix.loc[top, top]
+    off_diag = matrix.copy().astype(float)
+    np.fill_diagonal(off_diag.values, 0)
+    freq = off_diag.sum(axis=1).sort_values(ascending=False)
+    top  = freq.head(top_n).index.tolist()
+    sub  = matrix.loc[top, top]
 
     fig, ax = plt.subplots(figsize=(14, 12))
     sns.heatmap(
         sub,
         ax=ax,
         cmap="YlOrRd",
-        annot=(len(top) <= 15),
+        annot=(len(top) <= 15),   # suppress cell numbers above 15 — text overlaps
         fmt="d",
         linewidths=0.4,
         cbar_kws={"label": "Co-occurrence count", "shrink": 0.8},
@@ -944,7 +981,8 @@ def _run_scerevisiae_workflow(max_proteins: int = 300, top_n: int = 20) -> dict:
     if matrix.empty:
         print("  No domain annotations in retrieved data.  "
               "Try increasing max_proteins or check UniProt connectivity.")
-        return {"df": df, "matrix": matrix, "cooccurrence": cooc}
+        return {"df": df, "matrix": matrix, "cooccurrence": cooc,
+                "agr_path": None, "heatmap_path": None}
 
     mat_path = RESULTS_DIR / "scerevisiae_cooccurrence_matrix.tsv"
     matrix.to_csv(mat_path, sep="\t")
@@ -1045,11 +1083,22 @@ Examples
         return
 
     if args.workflow:
+        other_actions = [args.mine, bool(args.cooccurrence), bool(args.xmgrace),
+                         bool(args.bed_to_fasta), bool(args.remove_redundant),
+                         bool(args.detect_duplicates)]
+        if any(other_actions):
+            print("  [WARNING] --workflow is self-contained; "
+                  "--mine/--cooccurrence/--xmgrace/--bed-to-fasta/"
+                  "--remove-redundant/--detect-duplicates are ignored.")
         _run_scerevisiae_workflow(max_proteins=args.max)
         return
 
     if args.mine:
         mine_uniprot(args.org, max_results=args.max)
+        if args.cooccurrence is None:
+            expected = RESULTS_DIR / f"uniprot_{args.org}.tsv"
+            print(f"  Tip: run co-occurrence on mined data with "
+                  f"--cooccurrence {expected}")
 
     if args.cooccurrence:
         df = pd.read_csv(args.cooccurrence, sep="\t")
@@ -1068,6 +1117,8 @@ Examples
         for d1 in mat.index:
             for d2 in mat.columns:
                 cnt = int(mat.loc[d1, d2])
+                # str(d1) <= str(d2) reproduces the (min,max) canonical key from
+                # compute_domain_cooccurrence; equivalent for all Unicode strings
                 if cnt > 0 and str(d1) <= str(d2):
                     cooc[(str(d1), str(d2))] = cnt
         generate_xmgrace_cooccurrence(

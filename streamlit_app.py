@@ -86,12 +86,6 @@ st.markdown(
 
 # ── sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image(
-        "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/"
-        "Camponotus_flavomarginatus_ant.jpg/240px-Camponotus_flavomarginatus_ant.jpg",
-        use_column_width=False,
-        width=50,
-    )
     st.title("🧬 Protein Domain Toolkit")
     st.caption("Dr. Arli Aditya Parikesit")
     st.caption("Department of Bioinformatics, i3L University")
@@ -206,15 +200,14 @@ if tool == "⚡ Full S. cerevisiae Workflow":
 
     if st.button("▶  Run Full Workflow", type="primary", use_container_width=True):
         progress = st.progress(0, text="Initialising …")
-        log      = st.empty()
 
         try:
             # ── step 1 ──────────────────────────────────────────────────────
-            log.info("Step 1/4 — Mining UniProt for S. cerevisiae …")
-            progress.progress(10, text="Mining UniProt …")
+            progress.progress(10, text="Step 1/4 — Mining UniProt …")
             df = mine_uniprot(SCEREVISIAE_TAXID, reviewed=True,
                               max_results=max_proteins)
-            st.session_state["uniprot_df"] = df
+            st.session_state["uniprot_df"]     = df
+            st.session_state["uniprot_org_id"] = SCEREVISIAE_TAXID
             progress.progress(30, text="UniProt data retrieved.")
 
             # stats row
@@ -235,8 +228,7 @@ if tool == "⚡ Full S. cerevisiae Workflow":
                 st.dataframe(df.head(10), use_container_width=True)
 
             # ── step 2 ──────────────────────────────────────────────────────
-            log.info("Step 2/4 — Computing domain co-occurrence …")
-            progress.progress(50, text="Computing co-occurrence matrix …")
+            progress.progress(50, text="Step 2/4 — Computing co-occurrence matrix …")
             matrix, cooc = compute_domain_cooccurrence(df)
             st.session_state["cooccurrence_matrix"]  = matrix
             st.session_state["cooccurrence_counter"] = cooc
@@ -271,8 +263,7 @@ if tool == "⚡ Full S. cerevisiae Workflow":
                     )
 
                 # ── step 3 ──────────────────────────────────────────────────
-                log.info("Step 3/4 — Generating XMGrace .agr file …")
-                progress.progress(75, text="Generating XMGrace output …")
+                progress.progress(75, text="Step 3/4 — Generating XMGrace output …")
                 agr_path = RESULTS_DIR / "scerevisiae_domain_cooccurrence.agr"
                 agr_content = generate_xmgrace_cooccurrence(
                     cooc, agr_path, top_n=top_n_agr, title=agr_title
@@ -285,8 +276,7 @@ if tool == "⚡ Full S. cerevisiae Workflow":
                     )
 
                 # ── step 4 ──────────────────────────────────────────────────
-                log.info("Step 4/4 — Rendering heatmap …")
-                progress.progress(90, text="Rendering heatmap …")
+                progress.progress(90, text="Step 4/4 — Rendering heatmap …")
                 hm_path = RESULTS_DIR / "scerevisiae_domain_heatmap.png"
                 plot_cooccurrence_heatmap(
                     matrix, hm_path,
@@ -297,10 +287,10 @@ if tool == "⚡ Full S. cerevisiae Workflow":
                     top_n=top_n_heat,
                 )
                 progress.progress(100, text="Done.")
-                log.success("Workflow complete.")
+                st.success("Workflow complete.")
 
                 st.subheader("Domain Co-occurrence Heatmap")
-                st.image(str(hm_path), use_column_width=True)
+                st.image(str(hm_path), use_container_width=True)
 
                 # ── downloads ────────────────────────────────────────────────
                 st.subheader("Download Results")
@@ -337,8 +327,7 @@ if tool == "⚡ Full S. cerevisiae Workflow":
                 )
 
         except Exception as exc:
-            log.error(f"Workflow failed: {exc}")
-            st.error(f"Error: {exc}")
+            st.error(f"Workflow failed: {exc}")
             st.exception(exc)
 
 
@@ -373,7 +362,8 @@ elif tool == "🔬 UniProt Mining":
                     reviewed=reviewed,
                     max_results=max_r,
                 )
-                st.session_state["uniprot_df"] = df
+                st.session_state["uniprot_df"]     = df
+                st.session_state["uniprot_org_id"] = org_id
                 st.success(f"Retrieved {len(df)} proteins.")
 
                 st.dataframe(df.head(20), use_container_width=True)
@@ -414,7 +404,11 @@ elif tool == "📊 Domain Co-occurrence":
             st.info(f"Loaded {len(df)} rows, {len(df.columns)} columns.")
     elif "uniprot_df" in st.session_state:
         df = st.session_state["uniprot_df"]
-        st.info(f"Using session data ({len(df)} proteins).")
+        cached_org = st.session_state.get("uniprot_org_id", "unknown")
+        st.warning(
+            f"Using cached session data: **{len(df)} proteins** from TaxID **{cached_org}**.  \n"
+            "Upload a file above or re-run UniProt Mining to use different data."
+        )
 
     if df is not None:
         top_n = st.slider("Top N domains in heatmap", 5, 40, 20)
@@ -459,7 +453,7 @@ elif tool == "📊 Domain Co-occurrence":
                             matrix, hm_path, top_n=top_n,
                             title=f"Domain Co-occurrence (top {top_n} domains)",
                         )
-                        st.image(str(hm_path), use_column_width=True)
+                        st.image(str(hm_path), use_container_width=True)
 
                         # downloads
                         c_a, c_b = st.columns(2)
@@ -589,7 +583,13 @@ elif tool == "🧫 BED → FASTA":
     )
 
     if bed_file and genome_dir:
-        if st.button("Convert BED → FASTA", type="primary"):
+        if not Path(genome_dir).exists():
+            st.error(
+                f"Genome directory not found: `{genome_dir}`  \n"
+                "Provide a valid server-side path to a directory containing "
+                "per-chromosome FASTA files (`<chrom>.fa`)."
+            )
+        elif st.button("Convert BED → FASTA", type="primary"):
             with tempfile.NamedTemporaryFile(
                 suffix=".bed", delete=False, mode="w"
             ) as tmp:

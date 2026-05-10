@@ -3,9 +3,18 @@
 > **Integrating legacy bioinformatics shell scripts into a reproducible Python pipeline with a Streamlit web interface.**
 
 **Author:** Dr.rer.nat. Arli Aditya Parikesit, S.Si., M.Si.  
-**Affiliation:** Department of Bioinformatics, i3L University, Jakarta  
+**Affiliation:** Department of Biotechnology, School of Health and Life Sciences, i3L University, Jakarta  
 **ORCID:** [0000-0001-8716-3926](https://orcid.org/0000-0001-8716-3926)  
 **PhD Dissertation:** [DOI 10.6084/M9.FIGSHARE.964089](https://doi.org/10.6084/M9.FIGSHARE.964089)
+
+---
+
+## Version History
+
+| Version | Date       | Changes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **1.1** | 2026-05-10 | Code review fixes: 21 issues resolved across `protein_domain_toolkit.py` and `streamlit_app.py`. Medium severity: silent domain-drop logging, explicit `ft_domain` column detection, XMGrace label disambiguation and fallback warning, diagonal-corrected heatmap ranking, complete return dict from workflow, `--mine` CLI tip, genome dir validation in Streamlit, stale session state warning. Low severity: `UNIPROT_PAGE_SIZE` constant, 3-attempt retry on UniProt requests, narrowed coordinate filter in `_parse_domains`, empty DataFrame contract comment, `@version` annotation, annotation threshold comment, `--workflow` flag conflict warning, deprecated `use_column_width` replaced, `st.empty()` log overwrite fixed, placeholder image removed. See `recap.md` for full issue catalogue. |
+| **1.0** | 2026-05-10 | Initial release. Consolidated five legacy shell/Perl scripts into unified Python toolkit and Streamlit web app. Live S. cerevisiae use-case via UniProt REST API. XMGrace `.agr` export and seaborn heatmap output.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ---
 
