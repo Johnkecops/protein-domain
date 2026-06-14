@@ -267,3 +267,5 @@ If this toolkit contributes to published work, please cite:
   doi     = {10.3390/genes2040912}
 }
 ```
+
+**AI Assistance Disclaimer**: This codebase was developed with the assistance of Claude Code. While the AI provided code generation, debugging, and structural support, the human developer maintains full responsibility for reviewing, testing, and maintaining all content and functionality.
