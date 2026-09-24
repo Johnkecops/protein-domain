@@ -1,6 +1,11 @@
 # Protein Domain Analysis Toolkit — Python dependencies
 # Install: pip install -r requirements.txt
 #
+# Scope: covers protein_domain_toolkit.py and streamlit_app.py only.
+# domain_length_correlation_scerevisiae.sce (see README-SCILAB.md) runs in
+# Scilab, a separate runtime with its own install — nothing here is required
+# by it, and it adds nothing here.
+#
 # Core scientific stack
 biopython>=1.81
 pandas>=2.0.0
